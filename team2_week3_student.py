@@ -217,16 +217,8 @@ def research_assignment(assignment: dict, original_question: str) -> dict:
     for result in tavily_answer["results"]:
         source_text.append((result["url"], result["title"], result["content"]))
 
-    agentNum = None
-
-    if agent == "Competitor":
-        agentNum = 0 
-    elif agent == "Market":
-        agentNum = 1
-    else:
-        agentNum = 2
     
-    model_response=call_model_json(system_prompt="You are given an original question framed here: "+str(original_question)+SPECIALIST_PROMPTS[agentNum])
+    model_response=call_model_json(system_prompt="You are given an original question framed here: "+str(original_question)+SPECIALIST_PROMPTS[agent])
 
     return { 
         "agent":agent,
@@ -256,7 +248,6 @@ def specialists_node(state: ResearchState) -> dict:
     # - Do not call them one-by-one in a normal sequential for-loop.
     # - Week 4 will add the shared evidence store; do not build it here.
     pass
-
     return {"specialist_results": specialist_results}
 
 
