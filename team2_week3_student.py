@@ -170,6 +170,7 @@ def supervisor_node(state: ResearchState) -> dict:
 # ---------------- Week 3 specialist execution ----------------
 def research_assignment(assignment: dict, original_question: str) -> dict:
     """Execute ONE specialist's assignment."""
+
     # TODO 1:
     # 1. Read:
     #       agent = assignment["agent"]
@@ -200,6 +201,40 @@ def research_assignment(assignment: dict, original_question: str) -> dict:
     #
     # This function should execute only ONE specialist. Do not loop over all
     # assignments here.
+
+    agent=assignment["agent"]
+    objective=assignment["objective"]
+    output_fields=assignment["output_fields"]
+
+    tavily_answer=tavily.search(
+        query=objective,
+        search_depth="advanced",
+        max_results=5,
+    )
+
+    source_text=tuple()
+
+    for result in tavily_answer["results"]:
+        source_text.append((result["url"], result["title"], result["content"]))
+
+    agentNum = None
+
+    if agent == "Competitor":
+        agentNum = 0 
+    elif agent == "Market":
+        agentNum = 1
+    else:
+        agentNum = 2
+    
+    model_response=call_model_json(system_prompt="You are given an original question framed here: "+str(original_question)+SPECIALIST_PROMPTS[agentNum])
+
+    return { 
+        "agent":agent,
+        "objective":objective, 
+        "output_fields":output_fields,
+        "research":model_response,
+        "sources":source_text
+    }
     raise NotImplementedError("Complete TODO 1: research_assignment().")
 
 
