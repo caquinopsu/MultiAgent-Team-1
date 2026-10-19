@@ -941,3 +941,251 @@ if st.button("Run Full Synthesis Pipeline", type="primary") and question.strip()
                 st.caption(f"{saved['evidence_count']} evidence records")
                 st.markdown(saved["report_markdown"])
         st.caption(f"{len(saved_reports)} reports stored in {EVIDENCE_DB}")
+
+
+"""
+ELP WEEK 6 — TEAM 2 — STUDENT EXERCISE
+Multi-agent reviewer / quality control
+
+==================== EXACT SETUP INSTRUCTIONS ====================
+1. OPEN the existing, combined TEAM 2 Streamlit Python app that contains your
+   completed Week 3, Week 4, and Week 5 work IN THAT ORDER.
+2. CONFIRM the Week 5 button runs and produces a 10-section draft report.
+   Complete Week 5 TODOs before moving on; Week 6 cannot fix missing Week 5 logic.
+3. SCROLL TO THE VERY END of that SAME .py app file, AFTER the last line of Week 5
+   (including the Week 5 Streamlit UI). Leave two blank lines.
+4. COPY THIS ENTIRE Week 6 extension (including imports, functions, graph, UI)
+   and PASTE IT BELOW Week 5. Do not paste into a new standalone .py script.
+5. DO NOT DELETE or replace Week 3/4/5. DO NOT mix Team 1 and Team 2 code.
+6. If you previously pasted a Week 6 extension, REPLACE that Week 6 block;
+   do NOT append duplicate Week 6 copies.
+7. SAVE your combined app, then run from a terminal in its directory:
+       streamlit run YOUR_EXISTING_APP_FILE.py
+8. Enter your research question in the EXISTING question input. Click:
+       Run Reviewed Synthesis Pipeline
+9. Inspect the quality result. PASS permits final display; failures must be
+   clearly flagged, with the draft accessible only for inspection.
+
+IMPORTANT:
+- Week 6 is NOT standalone; it calls existing Week 5 functions, graph nodes,
+  shared state, report/evidence helpers, model client, SQLite, and Streamlit.
+- You need the SAME working API keys and Python dependencies as Week 5.
+- Week 5 may still save a DRAFT to SQLite before Week 6 checks it;
+  that saved draft is NOT automatically an approved final report.
+- Use the new Week 6 button, not the older Week 5 button, for the full flow.
+- This is a live end-to-end prototype; it is not guaranteed to identify every
+  unsupported statement or broken URL. Inspect the verdict yourself.
+- NO follow-up Q&A or automatic extra research until Week 7.
+- Team 2: reviewer is an agent after synthesis; at most ONE revision.
+
+STUDENT: Complete all numbered TODOs before the NEXT meeting, at your own pace.
+Existing `pass` placeholders are exercises and the extension WILL NOT work until finished.
+END-OF-WEEK GOAL: The report is checked before being presented as trusted.
+===================================================================
+"""
+
+
+REVIEW_SYSTEM_PROMPT = """
+You are the REVIEWER / CRITIC AGENT in a multi-agent business research system.
+Evaluate the draft against the research question and Shared Evidence Store.
+Do not conduct new research and do not silently rewrite the report.
+
+Return ONLY valid JSON:
+{
+  "overall_status": "PASS" or "NEEDS_REVISION",
+  "scores": {
+    "completeness": 0,
+    "citation_support": 0,
+    "source_quality": 0,
+    "consistency": 0,
+    "business_usefulness": 0,
+    "clarity": 0
+  },
+  "issues": [
+    {
+      "category": "completeness | citation_support | source_quality | consistency | business_usefulness | clarity",
+      "section": "report section or overall",
+      "explanation": "specific problem",
+      "suggested_fix": "specific bounded fix"
+    }
+  ],
+  "research_gaps": ["gap that may require more research later"]
+}
+
+PASS only when all six scores are at least 7 and there are no material citation-support issues.
+""".strip()
+
+
+REVISION_SYSTEM_PROMPT = """
+You are the SYNTHESIS AGENT performing ONE controlled revision after reviewer feedback.
+Use ONLY the supplied shared evidence. Do not research new facts.
+Keep the same nine-section JSON report contract used in Week 5.
+If a true research gap cannot be fixed from existing evidence, acknowledge it in limitations.
+""".strip()
+
+
+# TODO 0 — REVIEWER AGENT
+# Give it: question + draft report + build_evidence_packet(evidence_records).
+# Call call_model_json(REVIEW_SYSTEM_PROMPT, prompt).
+# Normalize six scores to 0-10 integers and return:
+# overall_status, scores, issues, research_gaps.
+# Treat invalid model JSON shapes as a failed review, not a PASS.
+REVIEW_SCORE_KEYS = [
+    "completeness",
+    "citation_support",
+    "source_quality",
+    "consistency",
+    "business_usefulness",
+    "clarity",
+]
+
+
+def review_report(question: str, report: dict, evidence_records: list[dict]) -> dict:
+    """Score the draft report against the shared evidence; never rewrite it."""
+    packet = build_evidence_packet(evidence_records)
+
+    prompt = (
+        f"Research question: {question}\n\n"
+        "Draft report:\n"
+        + json.dumps(report, indent=2)
+        + "\n\nShared Evidence Store:\n"
+        + json.dumps(packet, indent=2)
+    )
+
+    try:
+        output = call_model_json(REVIEW_SYSTEM_PROMPT, prompt)
+    except json.JSONDecodeError:
+        output = {}
+    if not isinstance(output, dict):
+        output = {}
+
+    status = str(output.get("overall_status", "")).strip().upper()
+    raw_scores = output.get("scores")
+    issues = output.get("issues")
+    research_gaps = output.get("research_gaps")
+
+    valid_shape = (
+        status in {"PASS", "NEEDS_REVISION"}
+        and isinstance(raw_scores, dict)
+        and isinstance(issues, list)
+        and isinstance(research_gaps, list)
+    )
+
+    scores = {}
+    for key in REVIEW_SCORE_KEYS:
+        value = raw_scores.get(key) if isinstance(raw_scores, dict) else None
+        try:
+            score = round(float(value))
+        except (TypeError, ValueError):
+            score = 0
+            valid_shape = False
+        scores[key] = max(0, min(10, score))
+
+    issues = [issue for issue in issues if isinstance(issue, dict)] if isinstance(issues, list) else []
+    research_gaps = [str(gap) for gap in research_gaps] if isinstance(research_gaps, list) else []
+
+    if not valid_shape:
+        status = "NEEDS_REVISION"
+        issues.append({
+            "category": "review_error",
+            "section": "overall",
+            "explanation": "The reviewer returned an invalid response, so the report could not be approved.",
+            "suggested_fix": "Run the review again.",
+        })
+    elif status == "PASS" and min(scores.values()) < 7:
+        # The prompt's PASS rule, enforced in code rather than trusted to the model.
+        status = "NEEDS_REVISION"
+
+    return {
+        "overall_status": status,
+        "scores": scores,
+        "issues": issues,
+        "research_gaps": research_gaps,
+    }
+
+
+# TODO 1 — ONE CONTROLLED REVISION
+# Give the synthesis model the current report, reviewer feedback, and existing evidence.
+# It may revise wording/organization using existing evidence only.
+# It may NOT search or invent facts.
+# Ensure every REPORT_SECTION_KEYS key still exists.
+def revise_report_once(question: str, report: dict, evidence_records: list[dict], review: dict) -> dict:
+    """Apply the reviewer's feedback once, using only the existing evidence."""
+    packet = build_evidence_packet(evidence_records)
+    section_keys = [key for key, _title in REPORT_SECTION_KEYS]
+
+    prompt = (
+        f"Research question: {question}\n\n"
+        "Current draft report:\n"
+        + json.dumps(report, indent=2)
+        + "\n\nReviewer feedback:\n"
+        + json.dumps(review, indent=2)
+        + "\n\nShared Evidence Store:\n"
+        + json.dumps(packet, indent=2)
+        + "\n\nReturn the revised report as a JSON object with exactly these keys: "
+        + ", ".join(section_keys)
+    )
+
+    try:
+        output = call_model_json(REVISION_SYSTEM_PROMPT, prompt)
+    except json.JSONDecodeError:
+        output = {}
+    if not isinstance(output, dict):
+        output = {}
+
+    revised = {}
+    for key in section_keys:
+        value = output.get(key)
+        if isinstance(value, (list, dict)):
+            value = json.dumps(value, indent=2)
+        text = "" if value is None else str(value).strip()
+        # A section the revision dropped keeps its draft text rather than vanishing.
+        revised[key] = text or report.get(key, "Insufficient evidence to complete this section.")
+
+    return revised
+
+
+# TODO 2 — WEEK 6 STATE
+# Extend Week5ResearchState with:
+#   review: dict
+#   initial_review: dict
+#   final_report_markdown: str
+#   revision_performed: bool
+
+
+class Week6ResearchState(Week5ResearchState):
+    review: dict
+    initial_review: dict
+    final_report_markdown: str
+    revision_performed: bool
+
+
+# TODO 3 — REVIEW GATE NODE
+# 1. Review the Week 5 synthesized report.
+# 2. If PASS, keep it.
+# 3. If NEEDS_REVISION, revise ONCE using existing evidence.
+# 4. Review the revised report exactly once more.
+# 5. Render final markdown using render_report_markdown(...).
+def reviewer_node(state):
+    pass
+
+
+# TODO 4 — EXTEND THE MULTI-AGENT GRAPH
+# Reuse supervisor_node -> specialists_node -> evidence_store_node -> synthesis_node.
+# Add reviewer_node after synthesis.
+def build_week6_graph():
+    pass
+
+
+week6_graph = build_week6_graph()
+
+
+# TODO 5 — WEEK 6 UI
+# Add a "Run Reviewed Synthesis Pipeline" button.
+# Show:
+# - final report ONLY if overall_status == PASS
+# - if review fails, label the report unapproved and put it in an expander
+# - reviewer scorecard
+# - issues/research gaps
+# - initial review if a revision happened
+# - shared evidence

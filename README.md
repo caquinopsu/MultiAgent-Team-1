@@ -2,14 +2,14 @@
 
 A Streamlit app that answers a business research question with a team of agents:
 
-    Question → Supervisor → Specialists (parallel) → Shared Evidence (SQLite) → Synthesis → Report
+    Question → Supervisor → Specialists (parallel) → Shared Evidence (SQLite) → Synthesis → Reviewer → Report
 
 ## Run it
 
 From this folder:
 
     python -m pip install -r requirements_team2.txt
-    python -m streamlit run week3_4.py
+    python -m streamlit run multiagent.py
 
 The app needs a `.env` file in this folder containing `TAVILY_API_KEY` and `DEEPSEEK_API_KEY`.
 
@@ -17,20 +17,33 @@ The app needs a `.env` file in this folder containing `TAVILY_API_KEY` and `DEEP
 
 | File | What it is |
 | --- | --- |
-| `week3_4.py` | **The app.** One file holding Weeks 3, 4 and 5, in that order. |
+| `multiagent.py` | **The app.** One file holding Weeks 3, 4, 5 and 6, in that order. (Previously named `week3_4.py`.) |
 | `requirements_team2.txt` | Python packages the app needs. |
 | `.env` | Your API keys. Never commit this. |
 | `team2_evidence.db` | SQLite database the app creates: `evidence` table (Week 4) and `reports` table (Week 5). Safe to delete; it is rebuilt on the next run. |
 | `earlier_weeks/week2_supervisor.py` | The standalone Week 2 app (Supervisor → Tavily → Response). Kept for reference. |
-| `earlier_weeks/week4_starter.py` | The original, unfinished Week 4 starter. Its completed version is already inside `week3_4.py`. |
+| `earlier_weeks/week4_starter.py` | The original, unfinished Week 4 starter. Its completed version is already inside `multiagent.py`. |
 
-## Where each week lives in `week3_4.py`
+## Where each week lives in `multiagent.py`
 
 | Week | Section | Status |
 | --- | --- | --- |
 | 3 | Supervisor, specialist agents, parallel execution, first button | Done |
 | 4 | Evidence extraction, validation, SQLite store, second button | Done |
 | 5 | Report synthesis, `reports` table, third button | Done |
-| 6 | Citation verification, reviewer/critic agent | Not started |
+| 6 | Reviewer/critic agent, one controlled revision, fourth button | In progress — see below |
 
-Each week starts with a large docstring banner (`ELP Week 4 — ...`, `ELP WEEK 5 — ...`), so searching the file for `ELP W` jumps between them.
+Each week starts with a large docstring banner (`ELP Week 4 — ...`, `ELP WEEK 5 — ...`, `ELP WEEK 6 — ...`), so searching the file for `ELP W` jumps between them.
+
+### Week 6 progress
+
+| TODO | What | Status |
+| --- | --- | --- |
+| 0 | `review_report` — scores the draft on six criteria, treats malformed reviews as a failure, enforces the "all scores ≥ 7" PASS rule in code | Done |
+| 1 | `revise_report_once` — one revision from existing evidence only; a section the model drops keeps its draft text | Done |
+| 2 | `Week6ResearchState` — adds `review`, `initial_review`, `final_report_markdown`, `revision_performed` | Done |
+| 3 | `reviewer_node` — review → revise at most once → review again | To do |
+| 4 | `build_week6_graph` — Week 5 graph plus the reviewer node | To do |
+| 5 | Week 6 UI — "Run Reviewed Synthesis Pipeline" button | To do |
+
+Until TODOs 3–5 are done, Weeks 3–5 run normally and the Week 6 section shows nothing.
