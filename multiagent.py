@@ -1167,14 +1167,50 @@ class Week6ResearchState(Week5ResearchState):
 # 4. Review the revised report exactly once more.
 # 5. Render final markdown using render_report_markdown(...).
 def reviewer_node(state):
-    pass
+    """Review the draft, revise it at most once, and review the revision."""
+    question = state["question"]
+    report = state["report"]
+    evidence_records = state["evidence_records"]
+
+    review = review_report(question, report, evidence_records)
+    initial_review = review
+    revision_performed = False
+
+    if review["overall_status"] == "NEEDS_REVISION":
+        report = revise_report_once(question, report, evidence_records, review)
+        review = review_report(question, report, evidence_records)
+        revision_performed = True
+
+    return {
+        "report": report,
+        "review": review,
+        "initial_review": initial_review,
+        "final_report_markdown": render_report_markdown(report, evidence_records),
+        "revision_performed": revision_performed,
+    }
 
 
 # TODO 4 — EXTEND THE MULTI-AGENT GRAPH
 # Reuse supervisor_node -> specialists_node -> evidence_store_node -> synthesis_node.
 # Add reviewer_node after synthesis.
 def build_week6_graph():
-    pass
+    """Question -> Supervisor -> Specialists -> Shared Evidence -> Synthesis -> Reviewer -> END"""
+    graph = StateGraph(Week6ResearchState)
+
+    graph.add_node("supervise", supervisor_node)
+    graph.add_node("specialists", specialists_node)
+    graph.add_node("evidence_store", evidence_store_node)
+    graph.add_node("synthesis", synthesis_node)
+    graph.add_node("reviewer", reviewer_node)
+
+    graph.add_edge(START, "supervise")
+    graph.add_edge("supervise", "specialists")
+    graph.add_edge("specialists", "evidence_store")
+    graph.add_edge("evidence_store", "synthesis")
+    graph.add_edge("synthesis", "reviewer")
+    graph.add_edge("reviewer", END)
+
+    return graph.compile()
 
 
 week6_graph = build_week6_graph()
@@ -1189,3 +1225,86 @@ week6_graph = build_week6_graph()
 # - issues/research gaps
 # - initial review if a revision happened
 # - shared evidence
+
+# WHAT THIS DOES — SCORECARD: Shows the six reviewer scores as a one-row table.
+def show_review_scorecard(review: dict):
+    st.dataframe([review["scores"]], use_container_width=True)
+
+
+st.divider()
+st.subheader("Week 6 — Reviewed Synthesis Pipeline")
+st.caption("Question → Supervisor → Specialists → Shared Evidence → Synthesis → Reviewer → Report")
+
+if st.button("Run Reviewed Synthesis Pipeline", type="primary") and question.strip():
+    week6_state = {
+        "question": question.strip(),
+        "assignments": [],
+        "specialist_results": [],
+        "evidence_records": [],
+        "report": {},
+        "report_markdown": "",
+        "report_id": 0,
+        "review": {},
+        "initial_review": {},
+        "final_report_markdown": "",
+        "revision_performed": False,
+    }
+
+    try:
+        with st.spinner("Researching, synthesizing, and reviewing the report..."):
+            week6_result = week6_graph.invoke(week6_state)
+    except Exception as error:
+        st.error(f"The Week 6 reviewed workflow could not finish: {error}")
+    else:
+        review = week6_result["review"]
+
+        if review["overall_status"] == "PASS":
+            st.success("Reviewer verdict: PASS")
+            st.subheader("Final Report")
+            st.markdown(week6_result["final_report_markdown"])
+        else:
+            st.error(
+                "Reviewer verdict: NEEDS_REVISION. This report is NOT approved "
+                "and should not be treated as trusted."
+            )
+            with st.expander("Unapproved report (for inspection only)"):
+                st.markdown(week6_result["final_report_markdown"])
+
+        if week6_result["revision_performed"]:
+            st.caption("One revision was performed after the initial review.")
+
+        st.subheader("Reviewer Scorecard")
+        show_review_scorecard(review)
+
+        st.subheader("Issues")
+        if review["issues"]:
+            st.dataframe(review["issues"], use_container_width=True)
+        else:
+            st.write("No issues reported.")
+
+        st.subheader("Research Gaps")
+        if review["research_gaps"]:
+            for gap in review["research_gaps"]:
+                st.markdown(f"- {gap}")
+        else:
+            st.write("No research gaps reported.")
+
+        if week6_result["revision_performed"]:
+            initial_review = week6_result["initial_review"]
+            with st.expander(f"Initial review (before revision): {initial_review['overall_status']}"):
+                show_review_scorecard(initial_review)
+                if initial_review["issues"]:
+                    st.dataframe(initial_review["issues"], use_container_width=True)
+                for gap in initial_review["research_gaps"]:
+                    st.markdown(f"- {gap}")
+
+        st.subheader("Shared Evidence Used")
+        st.dataframe(
+            build_evidence_packet(week6_result["evidence_records"]),
+            use_container_width=True,
+        )
+        st.caption(
+            f"{len(week6_result['evidence_records'])} evidence records used. "
+            f"The Week 5 draft was saved to SQLite as report #{week6_result['report_id']}; "
+            "that saved draft is not an approved report."
+        )

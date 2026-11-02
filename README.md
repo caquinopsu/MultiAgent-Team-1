@@ -31,7 +31,7 @@ The app needs a `.env` file in this folder containing `TAVILY_API_KEY` and `DEEP
 | 3 | Supervisor, specialist agents, parallel execution, first button | Done |
 | 4 | Evidence extraction, validation, SQLite store, second button | Done |
 | 5 | Report synthesis, `reports` table, third button | Done |
-| 6 | Reviewer/critic agent, one controlled revision, fourth button | In progress — see below |
+| 6 | Reviewer/critic agent, one controlled revision, fourth button | Done |
 
 Each week starts with a large docstring banner (`ELP Week 4 — ...`, `ELP WEEK 5 — ...`, `ELP WEEK 6 — ...`), so searching the file for `ELP W` jumps between them.
 
@@ -42,8 +42,8 @@ Each week starts with a large docstring banner (`ELP Week 4 — ...`, `ELP WEEK 
 | 0 | `review_report` — scores the draft on six criteria, treats malformed reviews as a failure, enforces the "all scores ≥ 7" PASS rule in code | Done |
 | 1 | `revise_report_once` — one revision from existing evidence only; a section the model drops keeps its draft text | Done |
 | 2 | `Week6ResearchState` — adds `review`, `initial_review`, `final_report_markdown`, `revision_performed` | Done |
-| 3 | `reviewer_node` — review → revise at most once → review again | To do |
-| 4 | `build_week6_graph` — Week 5 graph plus the reviewer node | To do |
-| 5 | Week 6 UI — "Run Reviewed Synthesis Pipeline" button | To do |
+| 3 | `reviewer_node` — review → revise at most once → review again | Done |
+| 4 | `build_week6_graph` — Week 5 graph plus the reviewer node | Done |
+| 5 | Week 6 UI — "Run Reviewed Synthesis Pipeline" button | Done |
 
-Until TODOs 3–5 are done, Weeks 3–5 run normally and the Week 6 section shows nothing.
+Use the Week 6 button for the full flow. Only a PASS report is shown as final; a failed report is labelled unapproved and kept in an expander. The Week 5 draft is still saved to SQLite before review, so a saved report is not automatically approved.
