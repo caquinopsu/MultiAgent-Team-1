@@ -1308,3 +1308,384 @@ if st.button("Run Reviewed Synthesis Pipeline", type="primary") and question.str
             f"The Week 5 draft was saved to SQLite as report #{week6_result['report_id']}; "
             "that saved draft is not an approved report."
         )
+
+"""
+ELP WEEK 7 — TEAM 2 — STUDENT EXERCISE
+Interactive Research: gap/conflict detection + bounded additional research
+
+EXACT SETUP:
+1. Open the EXISTING, combined TEAM 2 Streamlit .py app (Weeks 3–6, in order).
+2. Finish Week 6 first; confirm 'Run Reviewed Synthesis Pipeline' works.
+3. Paste this ENTIRE Week 7 block at the END of that SAME file, after Week 6 UI.
+4. Do not create a standalone app. Do not delete, duplicate, or mix team blocks.
+5. Run: streamlit run YOUR_EXISTING_APP_FILE.py
+6. Click 'Run Week 7 Research Loop'.
+
+WEEK 7 SCOPE FOR TEAM 2: detect material gaps and conflicts, assign one bounded
+additional research pass to existing specialists, merge evidence, then synthesize
+and review. DO NOT add a new agent or an unbounded retry loop.
+STUDENT: Complete all TODOs before the next meeting.
+"""
+
+import json
+
+W7_T2_GAP_PROMPT = """
+You are the existing supervisor's GAP AND CONFLICT CHECK, not a new agent.
+Given the user's research question and evidence store, identify at most ONE
+material research gap or meaningful contradiction that targeted research could fix.
+Return JSON ONLY:
+  {"needs_research": boolean, "reason": string,
+   "targeted_question": string, "conflicts": [string], "gaps": [string]}
+Missing evidence and genuinely conflicting facts matter; duplicate coverage
+alone does not require searching. Do not invent missing facts or resolve a
+conflict by guessing. Recommend NO further research when already adequate.
+""".strip()
+
+# TODO 0 — GAP / CONFLICT DETECTION
+# Pass the original question and build_evidence_packet(state["evidence_records"])
+# to call_model_json(W7_T2_GAP_PROMPT, ...).
+# Return {"gap_check": {needs_research: bool, reason: str,
+#          targeted_question: str, conflicts: list, gaps: list},
+#         "additional_research_performed": False}.
+# Invalid model output must NOT accidentally trigger research.
+def week7_t2_find_gaps(state: dict) -> dict:
+    """Ask the supervisor whether ONE targeted search would fix a gap or conflict."""
+    packet = build_evidence_packet(state["evidence_records"])
+
+    prompt = (
+        f"Research question: {state['question']}\n\n"
+        "Shared Evidence Store:\n"
+        + json.dumps(packet, indent=2)
+    )
+
+    try:
+        output = call_model_json(W7_T2_GAP_PROMPT, prompt)
+    except json.JSONDecodeError:
+        output = {}
+    if not isinstance(output, dict):
+        output = {}
+
+    reason = output.get("reason")
+    targeted_question = output.get("targeted_question")
+    conflicts = output.get("conflicts")
+    gaps = output.get("gaps")
+
+    # Only a literal True plus a usable question counts; anything else means no search.
+    needs_research = (
+        output.get("needs_research") is True
+        and isinstance(targeted_question, str)
+        and bool(targeted_question.strip())
+    )
+
+    return {
+        "gap_check": {
+            "needs_research": needs_research,
+            "reason": str(reason).strip() if reason else "No reason given.",
+            "targeted_question": targeted_question.strip() if needs_research else "",
+            "conflicts": [str(item) for item in conflicts] if isinstance(conflicts, list) else [],
+            "gaps": [str(item) for item in gaps] if isinstance(gaps, list) else [],
+        },
+        "additional_research_performed": False,
+    }
+
+# TODO 1 — CONDITIONAL ROUTING
+# Return 'additional' only if a valid, material gap/conflict warrants searching;
+# otherwise return 'synthesis'.
+def week7_t2_route(state: dict) -> str:
+    gap_check = state.get("gap_check") or {}
+    if (
+        gap_check.get("needs_research") is True
+        and gap_check.get("targeted_question")
+        and not state.get("additional_research_performed")
+    ):
+        return "additional"
+    return "synthesis"
+
+# TODO 2 — ONE BOUNDED EXTRA RESEARCH PASS
+# Use the original existing supervisor_node, specialists_node,
+# evidence_store_node on the gap check's targeted_question.
+# Merge new records with previous evidence; preserve old evidence.
+# Do not recursively call week7_graph; no infinite loops.
+# Return evidence_records, specialist_results, additional_research_performed,
+# new_evidence_count.
+def week7_t2_additional_research(state: dict) -> dict:
+    """Run the existing supervisor and specialists once on the targeted question."""
+    targeted_question = state["gap_check"]["targeted_question"]
+    previous_records = state["evidence_records"]
+
+    # A separate mini-state, so the original question still drives synthesis.
+    extra_state = {
+        "question": targeted_question,
+        "assignments": [],
+        "specialist_results": [],
+        "evidence_records": [],
+    }
+    extra_state.update(supervisor_node(extra_state))
+    extra_state.update(specialists_node(extra_state))
+    extra_state.update(evidence_store_node(extra_state))
+
+    # Old records come first, so validation keeps them and drops only repeat claims.
+    merged = validate_shared_evidence(previous_records + extra_state["evidence_records"])
+
+    return {
+        "evidence_records": merged,
+        "specialist_results": state["specialist_results"] + extra_state["specialist_results"],
+        "additional_research_performed": True,
+        "new_evidence_count": len(merged) - len(previous_records),
+    }
+
+# TODO 3 — STATE
+# Extend Week6ResearchState, adding:
+# gap_check: dict
+# additional_research_performed: bool
+# new_evidence_count: int
+class Week7ResearchState(Week6ResearchState):
+    gap_check: dict
+    additional_research_performed: bool
+    new_evidence_count: int
+
+
+# TODO 4 — WEEK 7 GRAPH
+# START -> supervise -> specialists -> evidence_store -> gap_check
+# gap_check -> synthesis (no missing evidence)
+# gap_check -> additional -> synthesis (at most one extra pass)
+# synthesis -> review -> END
+# Reuse EXISTING Team 2 nodes. Do not invent agents.
+def build_week7_graph():
+    graph = StateGraph(Week7ResearchState)
+
+    graph.add_node("supervise", supervisor_node)
+    graph.add_node("specialists", specialists_node)
+    graph.add_node("evidence_store", evidence_store_node)
+    graph.add_node("gap_check", week7_t2_find_gaps)
+    graph.add_node("additional", week7_t2_additional_research)
+    graph.add_node("synthesis", synthesis_node)
+    graph.add_node("review", reviewer_node)
+
+    graph.add_edge(START, "supervise")
+    graph.add_edge("supervise", "specialists")
+    graph.add_edge("specialists", "evidence_store")
+    graph.add_edge("evidence_store", "gap_check")
+    graph.add_conditional_edges(
+        "gap_check",
+        week7_t2_route,
+        {"additional": "additional", "synthesis": "synthesis"},
+    )
+    # The extra pass always goes straight on to synthesis, never back to gap_check.
+    graph.add_edge("additional", "synthesis")
+    graph.add_edge("synthesis", "review")
+    graph.add_edge("review", END)
+
+    return graph.compile()
+
+# TODO 5 — ASSIGN THE COMPILED GRAPH (after TODO 3 and TODO 4 work).
+week7_graph = build_week7_graph()
+
+# TODO 6 — STREAMLIT UI
+# Add 'Run Week 7 Research Loop'.
+# Run the graph with the same Week 6 initial state plus Week 7 fields.
+# Show gap/conflict notes and whether additional research occurred.
+# Present final report ONLY if reviewer status == PASS.
+# Otherwise place draft in expander with unapproved label.
+# Show reviewer details + evidence for debugging.
+st.divider()
+st.subheader("Week 7 — Research Loop with Gap Check")
+st.caption(
+    "Question → Supervisor → Specialists → Shared Evidence → Gap Check "
+    "→ (one extra pass) → Synthesis → Reviewer → Report"
+)
+
+if st.button("Run Week 7 Research Loop", type="primary") and question.strip():
+    week7_state = {
+        "question": question.strip(),
+        "assignments": [],
+        "specialist_results": [],
+        "evidence_records": [],
+        "report": {},
+        "report_markdown": "",
+        "report_id": 0,
+        "review": {},
+        "initial_review": {},
+        "final_report_markdown": "",
+        "revision_performed": False,
+        "gap_check": {},
+        "additional_research_performed": False,
+        "new_evidence_count": 0,
+    }
+
+    try:
+        with st.spinner("Researching, checking for gaps, synthesizing, and reviewing..."):
+            week7_result = week7_graph.invoke(week7_state)
+    except Exception as error:
+        st.error(f"The Week 7 research loop could not finish: {error}")
+    else:
+        gap_check = week7_result["gap_check"]
+        st.subheader("Gap / Conflict Check")
+        st.write(f"**Reason:** {gap_check['reason']}")
+        if gap_check["gaps"]:
+            st.write("**Gaps:**")
+            for gap in gap_check["gaps"]:
+                st.markdown(f"- {gap}")
+        if gap_check["conflicts"]:
+            st.write("**Conflicts:**")
+            for conflict in gap_check["conflicts"]:
+                st.markdown(f"- {conflict}")
+
+        if week7_result["additional_research_performed"]:
+            st.info(
+                f"One additional research pass ran on: \"{gap_check['targeted_question']}\" "
+                f"({week7_result['new_evidence_count']} new evidence records)."
+            )
+        else:
+            st.info("No additional research was needed.")
+
+        review = week7_result["review"]
+        if review["overall_status"] == "PASS":
+            st.success("Reviewer verdict: PASS")
+            st.subheader("Final Report")
+            st.markdown(week7_result["final_report_markdown"])
+        else:
+            st.error(
+                "Reviewer verdict: NEEDS_REVISION. This report is NOT approved "
+                "and should not be treated as trusted."
+            )
+            with st.expander("Unapproved report (for inspection only)"):
+                st.markdown(week7_result["final_report_markdown"])
+
+        with st.expander("Reviewer details"):
+            show_review_scorecard(review)
+            if review["issues"]:
+                st.dataframe(review["issues"], use_container_width=True)
+            for gap in review["research_gaps"]:
+                st.markdown(f"- {gap}")
+            if week7_result["revision_performed"]:
+                st.caption(
+                    "One revision was performed; initial verdict was "
+                    f"{week7_result['initial_review']['overall_status']}."
+                )
+
+        with st.expander("Shared evidence used"):
+            st.dataframe(
+                build_evidence_packet(week7_result["evidence_records"]),
+                use_container_width=True,
+            )
+            st.caption(f"{len(week7_result['evidence_records'])} evidence records used")
+
+
+
+
+
+
+
+"""STUDENT VERSION — complete the marked TODOs with your team.
+Paste ONCE after completed Week 7 code in your existing Team 2 Streamlit app.
+This is NOT a standalone script. The approval gate deliberately fails closed
+until you complete TODO 1. Ask instructors to help with failing earlier weeks.
+"""
+"""
+ELP WEEK 8 — TEAM 2 (MULTI-AGENT) — INTEGRATION EXTENSION
+
+WHERE TO PASTE
+1. Open YOUR team's combined Streamlit app with completed Weeks 3–7.
+2. Finish ALL prior TODOs, back up/commit the file, then paste this file ONCE
+   at the very bottom AFTER the Week 7 UI block.
+3. Do NOT run standalone; do NOT mix Team 1 and Team 2 modules.
+4. Launch: streamlit run YOUR_COMBINED_APP.py
+5. Use the new Week 8 final run button. Earlier-week buttons are historical;
+   hide/remove obsolete sections after confirming this new workspace works.
+
+REQUIRES PREVIOUS CODE TO DEFINE: st, week7_graph, question.
+Uses existing Supervisor -> 3 specialists -> shared evidence -> gap check ->
+optional ONE extra pass -> synthesis -> Reviewer. No new agents or loops.
+
+STUDENT TODOs
+[ ] Verify all three specialist agents execute and their labels are visible.
+[ ] Confirm gap check triggers <= ONE extra pass and preserves evidence.
+[ ] Confirm the Reviewer quality gate prevents approved download on failure.
+[ ] Check sources manually and that all 10 report headings are present.
+[ ] Run three repeated trials with the same prompt and note errors/timing.
+[ ] Consolidate obsolete prior-week UI after this works.
+[ ] OPTIONAL separate scope decision: add user follow-up Q&A later only if
+    mentor/program leads explicitly prioritize it over stabilization.
+"""
+import time as _w8_time
+
+_w8_missing = [name for name in ("st", "week7_graph", "question") if name not in globals()]
+
+# TODO 1 — Implement a conservative quality gate.
+# Requirements: result is dict; review.overall_status == PASS;
+# final_report_markdown nonempty; >=1 evidence record; >=3 specialist outputs.
+# FAIL CLOSED while TODO is unfinished (never mark a draft approved).
+def _w8_t2_ready(result):
+    if not isinstance(result, dict):
+        return False
+    review = result.get("review")
+    if not isinstance(review, dict) or review.get("overall_status") != "PASS":
+        return False
+    report_text = result.get("final_report_markdown")
+    if not isinstance(report_text, str) or not report_text.strip():
+        return False
+    if len(result.get("evidence_records") or []) < 1:
+        return False
+    if len(result.get("specialist_results") or []) < 3:
+        return False
+    return True
+
+
+st.divider()
+st.header("Week 8 — Final Research Workspace | Team 2")
+st.caption("Supervisor · parallel specialists · shared evidence · gap check · synthesis · Reviewer")
+if _w8_missing:
+    st.error("Missing previous definitions: " + ", ".join(_w8_missing))
+else:
+    st.info("Week 8 integrates and stabilizes the existing work. Do not add new agents or unbounded research loops.")
+    if st.button("Run final Team 2 research", key="w8_t2_run", type="primary"):
+        if not question.strip():
+            st.warning("Enter a research question in the original input first.")
+        else:
+            _w8_initial = {"question": question.strip(), "assignments": [],
+                           "specialist_results": [], "evidence_records": [],
+                           "report": {}, "report_markdown": "", "report_id": 0,
+                           "review": {}, "initial_review": {}, "final_report_markdown": "",
+                           "revision_performed": False, "gap_check": {},
+                           "additional_research_performed": False, "new_evidence_count": 0}
+            _w8_start = _w8_time.perf_counter()
+            try:
+                with st.spinner("Coordinating specialists, gathering evidence and reviewing report..."):
+                    st.session_state["w8_t2_result"] = week7_graph.invoke(_w8_initial)
+                st.session_state["w8_t2_seconds"] = round(_w8_time.perf_counter() - _w8_start, 1)
+            except Exception as exc:
+                st.session_state.pop("w8_t2_result", None)
+                st.error(f"Research failed; no approved report was produced: {exc}")
+    if "w8_t2_result" in st.session_state:
+        _w8_result = st.session_state["w8_t2_result"]
+        _w8_ok = _w8_t2_ready(_w8_result)
+        _w8_evidence = _w8_result.get("evidence_records", []) or []
+        _w8_specialists = _w8_result.get("specialist_results", []) or []
+        _w8_a, _w8_b, _w8_c = st.columns(3)
+        _w8_a.metric("Duration (seconds)", st.session_state.get("w8_t2_seconds", "—"))
+        _w8_b.metric("Evidence records", len(_w8_evidence))
+        _w8_c.metric("Specialist outputs", len(_w8_specialists))
+        if _w8_ok:
+            st.success("Reviewer PASS — approved for prototype demo (not independently fact-checked).")
+            _w8_text = _w8_result.get("final_report_markdown", "")
+            st.markdown(_w8_text)
+            st.download_button("Download reviewed report (.md)", _w8_text,
+                               file_name="elp_team2_report.md", mime="text/markdown", key="w8_t2_download")
+        else:
+            st.error("Reviewer did not approve this report; no approved download is offered.")
+            with st.expander("Unapproved draft — internal debugging only"):
+                st.markdown(_w8_result.get("final_report_markdown", "") or _w8_result.get("report_markdown", ""))
+        with st.expander("Supervisor assignments / specialist contributions"):
+            st.json(_w8_result.get("assignments", []))
+            st.json(_w8_specialists)
+        with st.expander("Gap/conflict check + bounded extra research"):
+            st.json(_w8_result.get("gap_check", {}))
+            st.write("Extra pass occurred:", bool(_w8_result.get("additional_research_performed")))
+            st.write("New records:", _w8_result.get("new_evidence_count", 0))
+        with st.expander("Reviewer scorecard and evidence"):
+            st.json(_w8_result.get("review", {}))
+            st.dataframe(_w8_evidence, use_container_width=True)
+        # TODO 2 — Inspect each of the three specialist roles and verify
+        # the output is distinct. Check that the gap pass occurs at most once.
+        # TODO 3 — Manually open 3 cited source links and note problems.
