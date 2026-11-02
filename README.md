@@ -17,12 +17,10 @@ The app needs a `.env` file in this folder containing `TAVILY_API_KEY` and `DEEP
 
 | File | What it is |
 | --- | --- |
-| `multiagent.py` | **The app.** One file holding Weeks 3, 4, 5 and 6, in that order. (Previously named `week3_4.py`.) |
+| `multiagent.py` | **The app.** One file holding Weeks 3, 4, 5 and 6, in that order. |
 | `requirements_team2.txt` | Python packages the app needs. |
 | `.env` | Your API keys. Never commit this. |
 | `team2_evidence.db` | SQLite database the app creates: `evidence` table (Week 4) and `reports` table (Week 5). Safe to delete; it is rebuilt on the next run. |
-| `earlier_weeks/week2_supervisor.py` | The standalone Week 2 app (Supervisor → Tavily → Response). Kept for reference. |
-| `earlier_weeks/week4_starter.py` | The original, unfinished Week 4 starter. Its completed version is already inside `multiagent.py`. |
 
 ## Where each week lives in `multiagent.py`
 
